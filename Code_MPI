@@ -1,0 +1,91 @@
+#include <mpi.h>
+#include <iostream>
+#include <vector>
+#include <cstdlib>  // Для генерації випадкових чисел
+#include <ctime>    // Для використання високоточного часу
+
+void multiply_matrices(std::vector<std::vector<int>>& A, std::vector<std::vector<int>>& B, std::vector<std::vector<int>>& C, int n) {
+    // Функція для множення двох матриць: A і B, результат записується в матрицю C
+    for (int i = 0; i < n; i++) {  // Зовнішній цикл по рядках матриці C
+        for (int j = 0; j < n; j++) {  // Внутрішній цикл по стовпцях матриці C
+            C[i][j] = 0;  // Ініціалізуємо елемент C[i][j] значенням 0
+            for (int k = 0; k < n; k++) {  // Цикл по стовпцях матриці A і рядках матриці B
+                C[i][j] += std::abs(A[i][k] * B[k][j]);  // Множимо і беремо абсолютне значення
+            }
+        }
+    }
+}
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);  // Ініціалізація MPI для паралельних обчислень
+
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);  // Отримуємо унікальний номер процесу
+    MPI_Comm_size(MPI_COMM_WORLD, &size);  // Отримуємо загальну кількість процесів
+
+    int n = 1000;  // Розмірність матриць
+
+    // Оголошуємо три матриці A, B і C розміром n x n
+    std::vector<std::vector<int>> A(n, std::vector<int>(n));
+    std::vector<std::vector<int>> B(n, std::vector<int>(n));
+    std::vector<std::vector<int>> C(n, std::vector<int>(n));
+
+    if (rank == 0) {  // Перевіряємо, чи це головний процес
+        // Заповнюємо матрицю A випадковими числами від 1 до 9
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                A[i][j] = rand() % 9 + 1;  // Генеруємо випадкові числа від 1 до 9
+            }
+        }
+
+        // Заповнюємо матрицю B випадковими числами від 1 до 9
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                B[i][j] = rand() % 9 + 1;  // Генеруємо випадкові числа від 1 до 9
+            }
+        }
+
+        // Виводимо матрицю A
+        std::cout << "Matrix A:" << std::endl;
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                std::cout << A[i][j] << " ";  // Виводимо елементи матриці A
+            }
+            std::cout << std::endl;  // Перехід на новий рядок після кожного рядка матриці A
+        }
+
+        // Виводимо матрицю B
+        std::cout << "Matrix B:" << std::endl;
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                std::cout << B[i][j] << " ";  // Виводимо елементи матриці B
+            }
+            std::cout << std::endl;  // Перехід на новий рядок після кожного рядка матриці B
+        }
+    }
+
+    // Початок вимірювання часу
+    double start = MPI_Wtime();  // Використовуємо MPI_Wtime для вимірювання часу виконання
+
+    // Множимо матриці A та B
+    multiply_matrices(A, B, C, n);
+
+    // Кінець вимірювання часу
+    double end = MPI_Wtime();  // Завершуємо вимірювання часу
+
+    // Виводимо результат множення матриць C
+    std::cout << "Matrix C = A * B:" << std::endl;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            std::cout << C[i][j] << " ";  // Виводимо елементи результату множення
+        }
+        std::cout << std::endl;  // Перехід на новий рядок після кожного рядка матриці C
+    }
+
+    // Обчислюємо і виводимо час, витрачений на множення
+    double duration = end - start;  // Час виконання в секундах
+    std::cout << "Time elapsed: " << duration * 1000 << " milliseconds" << std::endl;  // Виводимо час в мілісекундах
+
+    MPI_Finalize();  // Завершуємо роботу з MPI
+    return 0;  // Повертаємо 0 для позначення успішного завершення програми
+}
