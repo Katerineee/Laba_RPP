@@ -1,91 +1,129 @@
-#include <mpi.h>
-#include <iostream>
-#include <vector>
-#include <cstdlib>  // Для генерації випадкових чисел
-#include <ctime>    // Для використання високоточного часу
+// Паралельне множення матриць з використанням MPI
 
-void multiply_matrices(std::vector<std::vector<int>>& A, std::vector<std::vector<int>>& B, std::vector<std::vector<int>>& C, int n) {
-    // Функція для множення двох матриць: A і B, результат записується в матрицю C
-    for (int i = 0; i < n; i++) {  // Зовнішній цикл по рядках матриці C
-        for (int j = 0; j < n; j++) {  // Внутрішній цикл по стовпцях матриці C
-            C[i][j] = 0;  // Ініціалізуємо елемент C[i][j] значенням 0
-            for (int k = 0; k < n; k++) {  // Цикл по стовпцях матриці A і рядках матриці B
-                C[i][j] += std::abs(A[i][k] * B[k][j]);  // Множимо і беремо абсолютне значення
+#include <mpi.h>    // Бібліотека для роботи з MPI
+#include <cstdio>   // Ввід/вивід (printf, scanf)
+#include <cstdlib>  // Для rand(), malloc()
+#include <ctime>    // Для time()
+
+int ProcNum;      // Загальна кількість процесів
+int ProcRank;     // Ранг (ідентифікатор) поточного процесу
+
+// Функція для виведення матриці на екран
+void PrintMatrix(double* mat, int rows, int cols) {
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j)
+            printf("%7.2f ", mat[i * cols + j]);
+        printf("\n");
+    }
+}
+
+// Ініціалізація: вводиться розмір, створюються матриці
+void ProcessInitialization(double*& A, double*& B, double*& C,
+                           double*& localA, double*& localC,
+                           int& size, int& rowsPerProc) {
+    if (ProcRank == 0) {
+        do {
+            printf("Введіть розмір квадратної матриці: ");
+            scanf("%d", &size);
+            if (size < ProcNum || size % ProcNum != 0)
+                printf("Розмір повинен бути кратний кількості процесів (%d)\n", ProcNum);
+        } while (size < ProcNum || size % ProcNum != 0);
+    }
+
+    MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD); // Розсилка розміру
+
+    rowsPerProc = size / ProcNum; // Скільки рядків отримає кожен процес
+
+    // Виділення памʼяті
+    B       = new double[size * size];
+    C       = new double[size * size];
+    localA  = new double[rowsPerProc * size];
+    localC  = new double[rowsPerProc * size];
+
+    if (ProcRank == 0) {
+        A = new double[size * size];
+        srand(unsigned(time(nullptr))); // ініціалізація генератора випадкових чисел
+        for (int i = 0; i < size; ++i)
+            for (int j = 0; j < size; ++j) {
+                A[i * size + j] = rand() % 10; // значення від 0 до 9
+                B[i * size + j] = rand() % 10;
             }
+    }
+}
+
+// Розподіл матриць між процесами
+void DataDistribution(double* A, double* B,
+                      double* localA, int size, int rowsPerProc) {
+    MPI_Bcast(B, size * size, MPI_DOUBLE, 0, MPI_COMM_WORLD); // Передача B всім
+    MPI_Scatter(A, rowsPerProc * size, MPI_DOUBLE,
+                localA, rowsPerProc * size, MPI_DOUBLE,
+                0, MPI_COMM_WORLD); // Розподіл рядків A
+}
+
+// Локальне множення частини A на B
+void ParallelMatrixMultiplication(double* localA, double* B,
+                                  double* localC, int size, int rowsPerProc) {
+    for (int i = 0; i < rowsPerProc; ++i) {
+        for (int j = 0; j < size; ++j) {
+            localC[i * size + j] = 0.0;
+            for (int k = 0; k < size; ++k)
+                localC[i * size + j] += localA[i * size + k] * B[k * size + j];
         }
     }
 }
 
-int main(int argc, char** argv) {
-    MPI_Init(&argc, &argv);  // Ініціалізація MPI для паралельних обчислень
+// Збір результатів з усіх процесів
+void ResultCollection(double* localC, double* C, int size, int rowsPerProc) {
+    MPI_Gather(localC, rowsPerProc * size, MPI_DOUBLE,
+               C,       rowsPerProc * size, MPI_DOUBLE,
+               0, MPI_COMM_WORLD);
+}
 
-    int rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);  // Отримуємо унікальний номер процесу
-    MPI_Comm_size(MPI_COMM_WORLD, &size);  // Отримуємо загальну кількість процесів
+// Звільнення памʼяті
+void ProcessTermination(double* A, double* B, double* C,
+                        double* localA, double* localC) {
+    if (ProcRank == 0) delete[] A;
+    delete[] B;
+    delete[] C;
+    delete[] localA;
+    delete[] localC;
+}
 
-    int n = 1000;  // Розмірність матриць
+// Головна функція
+int main(int argc, char* argv[]) {
+    MPI_Init(&argc, &argv);                        // Ініціалізація MPI
+    MPI_Comm_size(MPI_COMM_WORLD, &ProcNum);       // Отримати кількість процесів
+    MPI_Comm_rank(MPI_COMM_WORLD, &ProcRank);      // Отримати ранг процесу
 
-    // Оголошуємо три матриці A, B і C розміром n x n
-    std::vector<std::vector<int>> A(n, std::vector<int>(n));
-    std::vector<std::vector<int>> B(n, std::vector<int>(n));
-    std::vector<std::vector<int>> C(n, std::vector<int>(n));
+    if (ProcRank == 0)
+        printf("MPI Паралельне множення матриць\n");
 
-    if (rank == 0) {  // Перевіряємо, чи це головний процес
-        // Заповнюємо матрицю A випадковими числами від 1 до 9
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                A[i][j] = rand() % 9 + 1;  // Генеруємо випадкові числа від 1 до 9
-            }
-        }
+    double *A = nullptr, *B = nullptr, *C = nullptr;
+    double *localA = nullptr, *localC = nullptr;
+    int size, rowsPerProc;
+    double startTime, endTime, totalTime;
 
-        // Заповнюємо матрицю B випадковими числами від 1 до 9
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                B[i][j] = rand() % 9 + 1;  // Генеруємо випадкові числа від 1 до 9
-            }
-        }
+    startTime = MPI_Wtime(); // Початок таймера
 
-        // Виводимо матрицю A
-        std::cout << "Matrix A:" << std::endl;
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                std::cout << A[i][j] << " ";  // Виводимо елементи матриці A
-            }
-            std::cout << std::endl;  // Перехід на новий рядок після кожного рядка матриці A
-        }
+    ProcessInitialization(A, B, C, localA, localC, size, rowsPerProc);
+    DataDistribution(A, B, localA, size, rowsPerProc);
+    ParallelMatrixMultiplication(localA, B, localC, size, rowsPerProc);
+    ResultCollection(localC, C, size, rowsPerProc);
 
-        // Виводимо матрицю B
-        std::cout << "Matrix B:" << std::endl;
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                std::cout << B[i][j] << " ";  // Виводимо елементи матриці B
-            }
-            std::cout << std::endl;  // Перехід на новий рядок після кожного рядка матриці B
-        }
+    endTime = MPI_Wtime(); // Кінець таймера
+    totalTime = endTime - startTime;
+
+    if (ProcRank == 0) {
+        printf("Матриця A:\n");
+        PrintMatrix(A, size, size);
+        printf("Матриця B:\n");
+        PrintMatrix(B, size, size);
+        printf("Матриця A * B = C:\n");
+        PrintMatrix(C, size, size);
+        printf("Час виконання: %f секунд\n", totalTime);
     }
 
-    // Початок вимірювання часу
-    double start = MPI_Wtime();  // Використовуємо MPI_Wtime для вимірювання часу виконання
-
-    // Множимо матриці A та B
-    multiply_matrices(A, B, C, n);
-
-    // Кінець вимірювання часу
-    double end = MPI_Wtime();  // Завершуємо вимірювання часу
-
-    // Виводимо результат множення матриць C
-    std::cout << "Matrix C = A * B:" << std::endl;
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            std::cout << C[i][j] << " ";  // Виводимо елементи результату множення
-        }
-        std::cout << std::endl;  // Перехід на новий рядок після кожного рядка матриці C
-    }
-
-    // Обчислюємо і виводимо час, витрачений на множення
-    double duration = end - start;  // Час виконання в секундах
-    std::cout << "Time elapsed: " << duration * 1000 << " milliseconds" << std::endl;  // Виводимо час в мілісекундах
-
-    MPI_Finalize();  // Завершуємо роботу з MPI
-    return 0;  // Повертаємо 0 для позначення успішного завершення програми
+    ProcessTermination(A, B, C, localA, localC); // Очищення памʼяті
+    MPI_Finalize(); // Завершення роботи MPI
+    return 0;
 }
